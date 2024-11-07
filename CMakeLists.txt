@@ -42,3 +42,11 @@ matlab_add_mex(
     R2018a
 )
 target_include_directories(uno_mex PRIVATE include)
+
+matlab_add_mex(
+    NAME uno_options
+    SRC src/get_options.cpp
+    LINK_TO MexUtilities::MexUtilities uno::uno
+    R2018a
+)
+target_include_directories(uno_mex PRIVATE include)
