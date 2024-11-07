@@ -23,14 +23,49 @@ public:
     ~MexFunction() = default;
     void operator()(matlab::mex::ArgumentList outputs, matlab::mex::ArgumentList inputs) {
         
+
+        if (inputs.size() != 1 || !utilities::isstruct(inputs[0]))
+            utilities::error("Pass a struct with the fields 'variableInfo', 'funcs' and 'options'");
+        
+        matlab::data::StructArray problem = std::move(inputs[0]);
+        
+        if (!utilities::isfield(problem, "variableInfo"))
+            utilities::error("Field 'variableInfo' not supplied.");
+        if (!utilities::isfield(problem, "funcs"))
+            utilities::error("Field 'funcs' not supplied.");
+        if (!utilities::isfield(problem, "options"))
+            utilities::warning("Field 'options' not supplied.");
+
+
+        matlab::data::StructArray varInfo = std::move(problem[0]["variableInfo"]);
+        matlab::data::StructArray funcs = std::move(problem[0]["funcs"]);
+
+        if (!utilities::isfield(varInfo, "x0"))
+            utilities::error("Field 'x0' not supplied.");
+        
+        std::size_t nVar = varInfo[0]["x0"].getNumberOfElements();
+
+        if (!utilities::isfield(varInfo,"clBnds"))
+            utilities::error("Lower bound on constraints not supplied.");
+        
+        std::size_t nCon = varInfo[0]["clBnds"].getNumberOfElements();
+
+        
         uno::Options options = uno::DefaultOptions::load();
         uno::Options solvers_options = uno::DefaultOptions::determine_solvers_and_preset();
-        // uno::Options::set_preset(solvers_options, "ipopt");
-        options["logger"] = "DISCRETE";
+        if (utilities::isfield(problem, "options")) {
+            matlab::data::StructArray opts = std::move(problem[0]["options"]);
+            for (const auto &field : opts.getFieldNames()) {
+                solvers_options[field] = utilities::getstringvalue(opts[0][field]);
+            }
+        }
         options.overwrite_with(solvers_options);
 
-        std::unique_ptr<uno::Model> hs_model = std::make_unique<unomex::HS71>();
-        std::unique_ptr<uno::Model> model = uno::ModelFactory::reformulate(std::move(hs_model), options);
+        std::unique_ptr<unomex::mexModel> mex_model = std::make_unique<unomex::mexModel>(nVar,nCon);
+        mex_model->setVariableInfo(varInfo);
+        mex_model->setFunctionHandles(funcs);
+
+        std::unique_ptr<uno::Model> model = uno::ModelFactory::reformulate(std::move(mex_model), options);
         
         uno::Iterate initial_iterate(model->number_variables, model->number_constraints);
         model->initial_primal_point(initial_iterate.primals);
@@ -42,7 +77,7 @@ public:
         auto globalization_mechanism = uno::GlobalizationMechanismFactory::create(*constraint_relaxation_strategy, options);
         uno::Uno uno = uno::Uno(*globalization_mechanism, options);
 
-        // solve the instance
+        // // solve the instance
         uno.solve(*model, initial_iterate, options);
         matlab::data::ArrayFactory factory;
         outputs[0] = factory.createScalar(0);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <span>
 #include <limits>
 #include "model/Model.hpp"
 #include "linear_algebra/SparseVector.hpp"
@@ -210,101 +211,300 @@ namespace unomex
         }
     };
 
-    class HS71
+    class mexModel
         : public unomex::DataModel
     {
+        std::size_t _n{};
+        std::size_t _m{};
+        
+        matlab::data::TypedArray<double> _x0;
+        matlab::data::TypedArray<double> _lambda0;
+        matlab::data::StructArray _funcs;
+
+        matlab::data::ArrayFactory factory;
+        
         public:
-        HS71() : unomex::DataModel(4, 2, "HS71") {
-            _variable_lower_bounds = {1.0, 1.0, 1.0, 1.0};
-            _variable_upper_bounds = {5.0, 5.0, 5.0, 5.0};
-            _constraint_lower_bounds = {25.0, 40.0};
-            _constraint_upper_bounds = {std::numeric_limits<double>::infinity(), 40.0};
-            _constraint_type = {uno::FunctionType::NONLINEAR, uno::FunctionType::NONLINEAR};
-            initialise_from_data();
+        mexModel(std::size_t nVar, std::size_t nCon) 
+            : unomex::DataModel(nVar, nCon, "Matlab Model")
+            , _n(nVar)
+            , _m(nCon)
+            , _x0(factory.createArray<double>({nVar, 1}))
+            , _lambda0(factory.createArray<double>({nCon, 1}))
+            , _funcs(factory.createStructArray({0, 0},{}))
+        {
+            
         }
         
-        double evaluate_objective(const uno::Vector<double> &x) const override { return x[0] * x[3] * (x[0] + x[1] + x[2]) + x[2]; }
+        void setVariableInfo(matlab::data::StructArray &varInfo) {
+            if (!utilities::isfield(varInfo, "lBnds") || _n != varInfo[0]["lBnds"].getNumberOfElements()) {
+                utilities::error("Lower bounds on x must have {} entries", _n);
+            }
+            if (!utilities::isfield(varInfo, "uBnds") || _n != varInfo[0]["uBnds"].getNumberOfElements()) {
+                utilities::error("Upper bounds on x must have {} entries", _n);
+            }
+            if (!utilities::isfield(varInfo, "x0") || _n != varInfo[0]["x0"].getNumberOfElements()) {
+                utilities::error("Initial point x0 must have {} entries", _n);
+            }
+            if (!utilities::isfield(varInfo, "clBnds") || _m != varInfo[0]["clBnds"].getNumberOfElements()) {
+                utilities::error("Lower bound on constraints must have {} entries", _m);
+            }
+            if (!utilities::isfield(varInfo, "cuBnds") || _m != varInfo[0]["cuBnds"].getNumberOfElements()) {
+                utilities::error("Upper bound on constraints must have {} entries", _m);
+            }
+            
+            matlab::data::TypedArray<double> lBnds = std::move(varInfo[0]["lBnds"]);
+            matlab::data::TypedArray<double> uBnds = std::move(varInfo[0]["uBnds"]);
+            matlab::data::TypedArray<double> x0 = std::move(varInfo[0]["x0"]);
+            matlab::data::TypedArray<double> clBnds = std::move(varInfo[0]["clBnds"]);
+            matlab::data::TypedArray<double> cuBnds = std::move(varInfo[0]["cuBnds"]);
+
+            std::copy(lBnds.cbegin(), lBnds.cend(), _variable_lower_bounds.begin());
+            std::copy(uBnds.cbegin(), uBnds.cend(), _variable_upper_bounds.begin());
+            std::copy(x0.cbegin(), x0.cend(), _x0.begin());
+            std::copy(clBnds.cbegin(), clBnds.cend(), _constraint_lower_bounds.begin());
+            std::copy(cuBnds.cbegin(), cuBnds.cend(), _constraint_upper_bounds.begin());
+
+            std::fill(_constraint_type.begin(), _constraint_type.end(), uno::FunctionType::NONLINEAR);
+
+            if (utilities::isfield(varInfo, "linearities")) {
+                matlab::data::TypedArray<double> linearities = std::move(varInfo[0]["linearities"]);
+                for (std::size_t i = 0; i < linearities.getNumberOfElements(); ++i) {
+                    _constraint_type[static_cast<std::size_t>(linearities[i])-1] = uno::FunctionType::LINEAR;
+                    _linear_constraints.emplace_back(static_cast<std::size_t>(linearities[i])-1);
+                }
+            }
+
+            if (utilities::isfield(varInfo, "lambda0")) {
+                matlab::data::TypedArray<double> lambda0 = std::move(varInfo[0]["lambda0"]);
+                std::copy(lambda0.cbegin(), lambda0.cend(), _lambda0.begin());
+            }
+            else
+                std::fill(_lambda0.begin(), _lambda0.end(), 0.0);
+            
+            initialise_from_data();
+        }
+
+        void setFunctionHandles(matlab::data::StructArray &funcs) {
+            if (utilities::isfield(funcs, "objective")) {
+            matlab::data::Array obj = utilities::getfield(funcs, "objective");
+            if (!utilities::ishandle(obj))
+                goto noobjective;
+            }
+            else {
+noobjective:
+                utilities::error("The objective field on funcs must be a function handle taking one vector intput");
+            }
+
+            if (utilities::isfield(funcs, "gradient")) {
+                matlab::data::Array g = utilities::getfield(funcs, "gradient");
+                if (!utilities::ishandle(g))
+                    goto nogradient;
+            }
+            else {
+nogradient:
+                utilities::error("The gradient field on funcs must be a function handle taking one vector intput");
+            }
+
+            if (utilities::isfield(funcs, "gradient_nonzeros")) {
+                matlab::data::Array gnz = utilities::getfield(funcs, "gradient_nonzeros");
+                if (!utilities::ishandle(gnz))
+                    goto nogradnz;
+            }
+            else {
+nogradnz:
+                utilities::error("The gradient_nonzeros field on funcs must be a function handle taking one vector intput");
+            }
+
+            if (utilities::isfield(funcs, "jacobian")) {
+                matlab::data::Array j = utilities::getfield(funcs, "jacobian");
+                if (!utilities::ishandle(j))
+                    goto nojac;
+            }
+            else {
+nojac:
+                utilities::error("The jacobian field on funcs must be a function handle taking one vector intput");
+            }
+
+            if (utilities::isfield(funcs, "jacobian_nonzeros")) {
+                matlab::data::Array jnz = utilities::getfield(funcs, "jacobian_nonzeros");
+                if (!utilities::ishandle(jnz))
+                    goto nojacnz;
+            }
+            else {
+nojacnz:
+                utilities::error("The jacobian_nonzeros field on funcs must be a function handle taking one vector intput");
+            }
+
+            if (utilities::isfield(funcs, "constraints")) {
+                matlab::data::Array c = utilities::getfield(funcs, "constraints");
+                if (!utilities::ishandle(c))
+                    goto nocons;
+            }
+            else {
+nocons:
+                utilities::error("The constraints field on funcs must be a function handle taking one vector intput");
+            }
+
+                
+            if (utilities::isfield(funcs, "hessian")) {
+                matlab::data::Array h = utilities::getfield(funcs, "hessian");
+                if (!utilities::ishandle(h))
+                    goto nohes;
+            }
+            else {
+nohes:
+                utilities::error("The hessian field on funcs must be a function handle taking x, sigma and lambda as inputs");
+            }
+            
+            if (utilities::isfield(funcs, "hessian_nonzeros")) {
+                matlab::data::Array hnz = utilities::getfield(funcs, "hessian_nonzeros");
+                if (!utilities::ishandle(hnz))
+                    goto nohesnz;
+            }
+            else {
+nohesnz:
+                utilities::error("The hessian_nonzeros field on funcs must be a function handle taking x, sigma and lambda as inputs");
+            }
+
+            _funcs = std::move(funcs);
+        }
+
+        double evaluate_objective(const uno::Vector<double> &x) const override { 
+            matlab::data::ArrayDimensions dims = {_n,1};
+            matlab::data::ArrayFactory f;
+            matlab::data::TypedArray<double> _x = f.createArray<double>(dims);
+            std::copy(x.begin(), x.end(), _x.begin());
+            auto retval = utilities::feval(_funcs[0]["objective"], 1, {_x});
+            return utilities::getscalar<double>(retval[0]);
+        }
 
         void evaluate_objective_gradient(const uno::Vector<double> &x, uno::SparseVector<double> &gradient) const override
         {
-            gradient.insert(0, x[0] * x[3] + x[3] * (x[0] + x[1] + x[2]));
-            gradient.insert(1, x[0] * x[3]);
-            gradient.insert(2, x[0] * x[3] + 1);
-            gradient.insert(3, x[0] * (x[0] + x[1] + x[2]));
+            matlab::data::ArrayDimensions dims = {_n,1};
+            matlab::data::ArrayFactory f;
+            matlab::data::TypedArray<double> _x = f.createArray<double>(dims);
+            std::copy(x.begin(), x.end(), _x.begin());
+            auto retval = utilities::feval(_funcs[0]["gradient"], 1, {_x});
+
+            matlab::data::SparseArray<double> grad = std::move(retval[0]);
+            matlab::data::SparseIndex idx;
+            for (auto it = grad.cbegin(); it != grad.cend(); ++it) 
+            {
+                idx = grad.getIndex(it);
+                gradient.insert(idx.first, *it);
+            }
+            
         }
 
         void evaluate_constraints(const uno::Vector<double> &x, std::vector<double> &constraints) const override
         {
-            constraints[0] = x[0] * x[1] * x[2] * x[3];
-            constraints[1] = x[0] * x[0] + x[1] * x[1] + x[2] * x[2] + x[3] * x[3];
+            
+            matlab::data::ArrayDimensions dims = {_n,1};
+            matlab::data::ArrayFactory f;
+            matlab::data::TypedArray<double> _x = f.createArray<double>(dims);
+            std::copy(x.begin(), x.end(), _x.begin());
+            auto retval = utilities::feval(_funcs[0]["constraints"], 1, {_x});
+            matlab::data::TypedArray<double> cons = std::move(retval[0]);
+            std::copy(cons.begin(), cons.end(), constraints.begin());
         }
 
         void evaluate_constraint_gradient(const uno::Vector<double> &x, size_t constraint_index, uno::SparseVector<double> &gradient) const override
         {
-            if (constraint_index == 0)
+            matlab::data::ArrayDimensions dims = {_n,1};
+            matlab::data::ArrayFactory f;
+            matlab::data::TypedArray<double> _x = f.createArray<double>(dims);
+            std::copy(x.begin(), x.end(), _x.begin());
+            auto retval = utilities::feval(_funcs[0]["jacobian"], 1, {_x});
+            matlab::data::SparseArray<double> jacobian = std::move(retval[0]);
+            matlab::data::SparseIndex idx;
+            
+            for (auto it = jacobian.cbegin(); it != jacobian.cend(); ++it) 
             {
-                gradient.insert(0, x[1] * x[2] * x[3]);
-                gradient.insert(1, x[0] * x[2] * x[3]);
-                gradient.insert(2, x[0] * x[1] * x[3]);
-                gradient.insert(3, x[0] * x[1] * x[2]);
-            }
-            else if (constraint_index == 1)
-            {
-                gradient.insert(0, 2 * x[0]);
-                gradient.insert(1, 2 * x[1]);
-                gradient.insert(2, 2 * x[2]);
-                gradient.insert(3, 2 * x[3]);
+                idx = jacobian.getIndex(it);
+                if (idx.first == constraint_index)
+                    gradient.insert(idx.second, *it);
             }
         }
         void evaluate_constraint_jacobian(const uno::Vector<double> &x, uno::RectangularMatrix<double> &constraint_jacobian) const override
         {
-            evaluate_constraint_gradient(x, 0, constraint_jacobian[0]);
-            evaluate_constraint_gradient(x, 1, constraint_jacobian[1]);
+            matlab::data::ArrayDimensions dims = {_n,1};
+            matlab::data::ArrayFactory f;
+            matlab::data::TypedArray<double> _x = f.createArray<double>(dims);
+            std::copy(x.begin(), x.end(), _x.begin());
+            auto retval = utilities::feval(_funcs[0]["jacobian"], 1, {_x});
+            matlab::data::SparseArray<double> jacobian = std::move(retval[0]);
+            matlab::data::SparseIndex idx;
+            for (auto it = jacobian.cbegin(); it != jacobian.cend(); ++it) 
+            {
+                idx = jacobian.getIndex(it);
+                constraint_jacobian[idx.first].insert(idx.second, *it);
+            }
+            
         }
         void evaluate_lagrangian_hessian(const uno::Vector<double> &x, double objective_multiplier, const uno::Vector<double> &multipliers,
                                          uno::SymmetricMatrix<size_t, double> &hessian) const override
         {
-            double H[4][4] = {{2 * x[3]              , x[3], x[3], 2 * x[0] + x[1] + x[2]},
-                              {x[3]                  , 0   , 0   , x[0]},
-                              {x[3]                  , 0   , 0   , x[0]},
-                              {2 * x[0] + x[1] + x[2], x[0], x[0], 0}};
+            
+            matlab::data::ArrayFactory f;
+            matlab::data::TypedArray<double> _x = f.createArray<double>({_n,1});
+            matlab::data::TypedArray<double> _sigma = f.createScalar(objective_multiplier);
+            matlab::data::TypedArray<double> _lambda = f.createArray<double>({_m,1});
+            std::copy(x.begin(), x.end(), _x.begin());
+            std::copy(multipliers.begin(), multipliers.end(), _lambda.begin());
 
-            double cH[4][4] = {{0          , x[2] * x[3], x[1] * x[3], x[1] * x[2]},
-                               {x[2] * x[3], 0          , x[0] * x[3], x[0] * x[2]},
-                               {x[1] * x[3], x[0] * x[3], 0          , x[0] * x[1]},
-                               {x[1] * x[2], x[0] * x[2], x[0] * x[1], 0          }};
-            const double cH2[4][4] = {{2, 0, 0, 0},
-                                      {0, 2, 0, 0},
-                                      {0, 0, 2, 0},
-                                      {0, 0, 0, 2}};
+            auto retval = utilities::feval(_funcs[0]["hessian"], 1, {_x, _sigma, _lambda});
+            
+            matlab::data::SparseArray<double> hess = std::move(retval[0]);
+
             hessian.reset();
-            hessian.reset();
-            for (size_t jCol = 0; jCol < 4; jCol++)
+            matlab::data::SparseIndex idx;
+            std::size_t jCol = hess.getIndex(hess.cbegin()).second;
+
+            for (auto it = hess.cbegin(); it != hess.cend(); ++it) 
             {
-                for (size_t iRow = 0; iRow <= jCol; iRow++)
+                idx = hess.getIndex(it);
+                if (idx.second != jCol)
                 {
-                    hessian.insert(objective_multiplier * H[iRow][jCol] - multipliers[0] * cH[iRow][jCol] - multipliers[1] * cH2[iRow][jCol], iRow, jCol);
+                    hessian.finalize_column(jCol);
+                    jCol = idx.second;
                 }
-                hessian.finalize_column(jCol);
+
+                hessian.insert(*it, idx.first, idx.second);
             }
+            hessian.finalize_column(jCol);
+
         }
 
         void initial_primal_point(uno::Vector<double> &x) const override {
-            std::vector<double> x0{1., 5., 5., 1.};
-            std::copy(x0.cbegin(), x0.cend(), x.begin());
+            std::copy(_x0.cbegin(), _x0.cend(), x.begin());
         }
 
         void initial_dual_point(uno::Vector<double> &multipliers) const override {
-            std::fill(multipliers.begin(), multipliers.end(), 0.0);
+            std::copy(_lambda0.begin(), _lambda0.end(),multipliers.begin());
         }
 
-        void postprocess_solution(uno::Iterate &iterate, uno::TerminationStatus termination_status) const override {
+        void postprocess_solution([[maybe_unused]]uno::Iterate &iterate, [[maybe_unused]]uno::TerminationStatus termination_status) const override {
 
         }
 
-        size_t number_objective_gradient_nonzeros() const override { return number_variables; }
-        size_t number_jacobian_nonzeros() const override { return 2 * number_variables; }
-        size_t number_hessian_nonzeros() const override { return number_variables * number_variables; }
-        
+        std::size_t number_objective_gradient_nonzeros() const override { 
+            if (utilities::isfield(_funcs, "gradient_nonzeros")){
+                auto retval = utilities::feval(_funcs[0]["gradient_nonzeros"], 1, {});
+                return static_cast<std::size_t>(utilities::getscalar<double>(retval[0]));
+            } else {
+                return _n;
+            }
+        }
+
+        std::size_t number_jacobian_nonzeros() const override {    
+            auto retval = utilities::feval(_funcs[0]["jacobian_nonzeros"], 1, {});
+            return static_cast<std::size_t>(utilities::getscalar<double>(retval[0]));
+        }
+
+        std::size_t number_hessian_nonzeros() const override { 
+            auto retval = utilities::feval(_funcs[0]["hessian_nonzeros"], 1, {});
+            return static_cast<std::size_t>(utilities::getscalar<double>(retval[0]));
+        }
+
     };
 } // namespace unomex
