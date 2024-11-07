@@ -7,7 +7,8 @@
 class MexFunction 
     : public matlab::mex::Function 
 {
-
+    matlab::data::ArrayFactory factory;
+    
 public:
     MexFunction()  {
         matlabPtr = getEngine();
@@ -26,5 +27,17 @@ public:
             uno::Options::set_preset(solvers_options, preset);
         }
 
+        std::vector<std::string> option_names;
+        for (const auto &elem : solvers_options)
+        {
+            option_names.push_back(elem.first);
+        }
+
+        matlab::data::StructArray options = factory.createStructArray({1, 1}, option_names);
+        for (const auto &elem : solvers_options)
+        {
+            options[0][elem.first] = factory.createScalar(elem.second);
+        }
+        outputs[0] = std::move(options);
     }
 };
