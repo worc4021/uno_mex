@@ -61,10 +61,9 @@ public:
         }
         options.overwrite_with(solvers_options);
 
-        std::unique_ptr<unomex::mexModel> mex_model = std::make_unique<unomex::mexModel>(nVar,nCon);
-        mex_model->setVariableInfo(varInfo);
-        mex_model->setFunctionHandles(funcs);
-
+        utilities::printf("Creating model with {} variables and {} constraints\n", nVar, nCon);
+        std::unique_ptr<unomex::mexModel> mex_model = std::make_unique<unomex::mexModel>(nVar,nCon,varInfo,funcs);
+        
         std::unique_ptr<uno::Model> model = uno::ModelFactory::reformulate(std::move(mex_model), options);
         
         uno::Iterate initial_iterate(model->number_variables, model->number_constraints);
@@ -77,7 +76,7 @@ public:
         auto globalization_mechanism = uno::GlobalizationMechanismFactory::create(*constraint_relaxation_strategy, options);
         uno::Uno uno = uno::Uno(*globalization_mechanism, options);
 
-        // // solve the instance
+        // // // solve the instance
         uno.solve(*model, initial_iterate, options);
         matlab::data::ArrayFactory factory;
         outputs[0] = factory.createScalar(0);

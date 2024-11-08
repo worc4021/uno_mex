@@ -10,8 +10,8 @@ funcs.jacobian_nonzeros = @()2;
 funcs.hessian_nonzeros = @()4;
 
 variableInfo.x0 = [3;2];
-variableInfo.lb = [-5;-5];
-variableInfo.ub = [5;5];
+variableInfo.lBnds = [-5;-5];
+variableInfo.uBnds = [5;5];
 variableInfo.clBnds = -inf;
 variableInfo.cuBnds = -2;
 
