@@ -2,6 +2,7 @@
 #include "mexAdapter.hpp"
 #include "utilities.hpp"
 #include "options/Options.hpp"
+#include "options/Presets.hpp"
 #include "options/DefaultOptions.hpp"
 
 class MexFunction 
@@ -16,7 +17,7 @@ public:
     ~MexFunction() = default;
     void operator()(matlab::mex::ArgumentList outputs, matlab::mex::ArgumentList inputs) {
         
-        uno::Options solvers_options = uno::DefaultOptions::determine_solvers_and_preset();
+        uno::Options solvers_options = uno::DefaultOptions::determine_solvers();
         if (inputs.size())
         {
             if (!utilities::isstring(inputs[0]))
@@ -24,7 +25,8 @@ public:
                 utilities::error("Pass a string with the preset name.");
             }
             std::string preset = utilities::getstringvalue(inputs[0]);
-            uno::Options::set_preset(solvers_options, preset);
+            uno::Options solver_preset = uno::Presets::get_preset_options(preset);
+            solvers_options.overwrite_with(solver_preset);
         }
 
         std::vector<std::string> option_names;
