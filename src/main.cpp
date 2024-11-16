@@ -12,6 +12,16 @@
 #include "tools/Logger.hpp"
 #include "nlp.hpp"
 
+template<typename Derived, typename Base, typename Del>
+std::unique_ptr<Derived, Del> 
+static_unique_ptr_cast(std::unique_ptr<Base, Del> && p)
+{
+    auto d = static_cast<Derived *>(p.release());
+    return std::unique_ptr<Derived, Del>(d, std::move(p.get_deleter()));
+}
+namespace unomex {
+unomex::Result result;
+} // namespace unomex
 class MexFunction 
     : public matlab::mex::Function 
 {
@@ -52,7 +62,7 @@ public:
 
         
         uno::Options options = uno::DefaultOptions::load();
-        uno::Options solvers_options = uno::DefaultOptions::determine_solvers_and_preset();
+        uno::Options solvers_options = uno::DefaultOptions::determine_solvers();
         if (utilities::isfield(problem, "options")) {
             matlab::data::StructArray opts = std::move(problem[0]["options"]);
             for (const auto &field : opts.getFieldNames()) {
@@ -61,6 +71,8 @@ public:
         }
         options.overwrite_with(solvers_options);
 
+        matlab::data::ArrayFactory factory;
+        unomex::result = unomex::Result(nVar, nCon);
         utilities::printf("Creating model with {} variables and {} constraints\n", nVar, nCon);
         std::unique_ptr<unomex::mexModel> mex_model = std::make_unique<unomex::mexModel>(nVar,nCon,varInfo,funcs);
         
@@ -78,7 +90,25 @@ public:
 
         // // // solve the instance
         uno.solve(*model, initial_iterate, options);
-        matlab::data::ArrayFactory factory;
-        outputs[0] = factory.createScalar(0);
+
+        matlab::data::StructArray retVal = factory.createStructArray({1,1}, {"solution", "cpu_time", "termination_status"});
+        matlab::data::StructArray sol = factory.createStructArray({1,1}, {"primals", "duals_lb_x", "duals_ub_x", "duals_constraints"});
+        matlab::data::TypedArray<double> x = factory.createArray<double>({unomex::result.number_variables, 1});
+        std::copy(unomex::result.solution.primals.begin(), unomex::result.solution.primals.end(), x.begin());
+        sol[0]["primals"] = std::move(x);
+        matlab::data::TypedArray<double> zL = factory.createArray<double>({unomex::result.number_variables, 1});
+        std::copy(unomex::result.solution.duals_lb_x.begin(), unomex::result.solution.duals_lb_x.end(), zL.begin());
+        sol[0]["duals_lb_x"] = std::move(zL);
+        matlab::data::TypedArray<double> zU = factory.createArray<double>({unomex::result.number_variables, 1});
+        std::copy(unomex::result.solution.duals_ub_x.begin(), unomex::result.solution.duals_ub_x.end(), zU.begin());
+        sol[0]["duals_ub_x"] = std::move(zU);
+        matlab::data::TypedArray<double> zC = factory.createArray<double>({unomex::result.number_constraints, 1});
+        std::copy(unomex::result.solution.duals_constraints.begin(), unomex::result.solution.duals_constraints.end(), zC.begin());
+        sol[0]["duals_constraints"] = std::move(zC);
+        retVal[0]["solution"] = std::move(sol);
+        retVal[0]["cpu_time"] = factory.createScalar(unomex::result.cpu_time);
+        retVal[0]["termination_status"] = factory.createScalar(uno::status_to_message(unomex::result.termination_status));
+        
+        outputs[0] = std::move(retVal);
     }
 };

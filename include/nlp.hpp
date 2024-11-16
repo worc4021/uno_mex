@@ -8,11 +8,46 @@
 #include "linear_algebra/Vector.hpp"
 #include "linear_algebra/RectangularMatrix.hpp"
 #include "linear_algebra/SymmetricMatrix.hpp"
-#include "optimization/Multipliers.hpp"
+#include "optimization/Iterate.hpp"
 #include "symbolic/CollectionAdapter.hpp"
+#include "tools/Timer.hpp"
 
 namespace unomex
 {
+
+    struct Result
+    {
+        struct Solution {
+            std::vector<double> primals;
+            std::vector<double> duals_lb_x;
+            std::vector<double> duals_ub_x;
+            std::vector<double> duals_constraints;
+            Solution(size_t number_variables, size_t number_constraints)
+                : primals(number_variables)
+                , duals_lb_x(number_variables)
+                , duals_ub_x(number_variables)
+                , duals_constraints(number_constraints)
+            {
+            }
+            Solution() = default;
+        } solution;
+        size_t number_variables;
+        size_t number_constraints;
+        double cpu_time;
+        uno::TerminationStatus termination_status;
+        
+        Result(std::size_t number_variables, std::size_t number_constraints)
+            : solution(number_variables, number_constraints)
+            , number_variables(number_variables)
+            , number_constraints(number_constraints)
+            , cpu_time(0.)
+            , termination_status(uno::TerminationStatus::NOT_OPTIMAL)
+        {
+        }
+        Result() = default;
+    };
+
+extern unomex::Result result;
 
     class DataModel : public uno::Model
     {
@@ -29,6 +64,8 @@ namespace unomex
         
 
         uno::SparseVector<size_t> _slacks{};
+
+        uno::Timer _timer;
     private:
         // lists of variables and constraints + corresponding collection objects
         std::vector<size_t> _equality_constraints;
@@ -46,33 +83,37 @@ namespace unomex
         uno::CollectionAdapter<std::vector<size_t> &> _single_upper_bounded_variables_collection;
         uno::CollectionAdapter<std::vector<size_t> &> _linear_constraints_collection;
 
-
     public:
+        
+
         DataModel(size_t number_variables, size_t number_constraints, const std::string &name = "DataModel")
-            : uno::Model(name, number_variables, number_constraints, 1.),
-              _variable_lower_bounds(number_variables),
-              _variable_upper_bounds(number_variables),
-              _constraint_lower_bounds(number_constraints),
-              _constraint_upper_bounds(number_constraints),
-              _variable_status(number_variables),
-              _constraint_type(number_constraints),
-              _constraint_status(number_constraints),
-              _linear_constraints(0),
-              _slacks(0),
-              _equality_constraints(0),
-              _inequality_constraints(0),
-              _equality_constraints_collection(_equality_constraints),
-              _inequality_constraints_collection(_inequality_constraints),
-              _lower_bounded_variables(0),
-              _lower_bounded_variables_collection(_lower_bounded_variables),
-              _upper_bounded_variables(0),
-              _upper_bounded_variables_collection(_upper_bounded_variables),
-              _single_lower_bounded_variables(0),
-              _single_lower_bounded_variables_collection(_single_lower_bounded_variables),
-              _single_upper_bounded_variables(0),
-              _fixed_variables(0),
-              _single_upper_bounded_variables_collection(_single_upper_bounded_variables),
-              _linear_constraints_collection(_linear_constraints) {}
+            : uno::Model(name, number_variables, number_constraints, 1.)
+            , _variable_lower_bounds(number_variables)
+            , _variable_upper_bounds(number_variables)
+            , _constraint_lower_bounds(number_constraints)
+            , _constraint_upper_bounds(number_constraints)
+            , _variable_status(number_variables)
+            , _constraint_type(number_constraints)
+            , _constraint_status(number_constraints)
+            , _linear_constraints(0)
+            , _slacks(0)
+            , _timer()
+            , _equality_constraints(0)
+            , _inequality_constraints(0)
+            , _equality_constraints_collection(_equality_constraints)
+            , _inequality_constraints_collection(_inequality_constraints)
+            , _lower_bounded_variables(0)
+            , _lower_bounded_variables_collection(_lower_bounded_variables)
+            , _upper_bounded_variables(0)
+            , _upper_bounded_variables_collection(_upper_bounded_variables)
+            , _single_lower_bounded_variables(0)
+            , _single_lower_bounded_variables_collection(_single_lower_bounded_variables)
+            , _single_upper_bounded_variables(0)
+            , _fixed_variables(0)
+            , _single_upper_bounded_variables_collection(_single_upper_bounded_variables)
+            , _linear_constraints_collection(_linear_constraints)
+        {
+        }
 
         virtual ~DataModel() override = default;
 
@@ -147,6 +188,16 @@ namespace unomex
             return _constraint_type[constraint_index];
         }
 
+        void postprocess_solution(uno::Iterate &iterate, uno::TerminationStatus termination_status) const override {
+            std::copy(iterate.primals.begin(), iterate.primals.end(), result.solution.primals.begin());
+            std::copy(iterate.multipliers.lower_bounds.begin(), iterate.multipliers.lower_bounds.end(), result.solution.duals_lb_x.begin());
+            std::copy(iterate.multipliers.upper_bounds.begin(), iterate.multipliers.upper_bounds.end(), result.solution.duals_ub_x.begin());
+            std::copy(iterate.multipliers.constraints.begin(), iterate.multipliers.constraints.end(), result.solution.duals_constraints.begin());
+            
+            result.cpu_time = _timer.get_duration();
+            result.termination_status = termination_status;
+        }
+
         void initialise_from_data()
         {
             for (std::size_t i = 0; i < number_variables; ++i)
@@ -209,6 +260,7 @@ namespace unomex
                 }
             }
         }
+
     };
 
     class mexModel
@@ -489,10 +541,6 @@ nohesnz:
             } else {
                 std::fill(multipliers.begin(), multipliers.end(), 0.);
             }
-        }
-
-        void postprocess_solution([[maybe_unused]]uno::Iterate &iterate, [[maybe_unused]]uno::TerminationStatus termination_status) const override {
-
         }
 
         std::size_t number_objective_gradient_nonzeros() const override { 

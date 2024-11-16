@@ -19,8 +19,15 @@ unostr.options = options;
 unostr.funcs = funcs;
 unostr.variableInfo = variableInfo;
 
-uno_mex(unostr)
+res = uno_mex(unostr);
 
+grad = gradient(res.solution.primals);
+jac = jacobian(res.solution.primals);
+
+kkt = grad - res.solution.duals_constraints*jac';
+norm(kkt,'inf')
+
+% ----------------------------------------------------------------------
 function fVal = objective(var)
 x = var(1,:);
 y = var(2,:);
