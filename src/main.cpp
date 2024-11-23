@@ -45,10 +45,13 @@ public:
             utilities::error("Field 'funcs' not supplied.");
         if (!utilities::isfield(problem, "options"))
             utilities::warning("Field 'options' not supplied.");
+        if (!utilities::isfield(problem, "callbacks"))
+            utilities::warning("Field 'callbacks' not supplied.");
 
 
         matlab::data::StructArray varInfo = std::move(problem[0]["variableInfo"]);
         matlab::data::StructArray funcs = std::move(problem[0]["funcs"]);
+        matlab::data::StructArray callbacks = std::move(problem[0]["callbacks"]);
 
         if (!utilities::isfield(varInfo, "x0"))
             utilities::error("Field 'x0' not supplied.");
@@ -88,8 +91,10 @@ public:
         auto globalization_mechanism = uno::GlobalizationMechanismFactory::create(*constraint_relaxation_strategy, options);
         uno::Uno uno = uno::Uno(*globalization_mechanism, options);
 
+        unomex::mexCallbacks mexcallbacks(callbacks);
+
         // // // solve the instance
-        uno.solve(*model, initial_iterate, options);
+        uno.solve(*model, initial_iterate, options, mexcallbacks);
 
         matlab::data::StructArray retVal = factory.createStructArray({1,1}, {"solution", "cpu_time", "termination_status"});
         matlab::data::StructArray sol = factory.createStructArray({1,1}, {"primals", "duals_lb_x", "duals_ub_x", "duals_constraints"});

@@ -10,6 +10,7 @@
 #include "linear_algebra/SymmetricMatrix.hpp"
 #include "optimization/Iterate.hpp"
 #include "symbolic/CollectionAdapter.hpp"
+#include "tools/UserCallbacks.hpp"
 #include "tools/Timer.hpp"
 
 namespace unomex
@@ -266,11 +267,13 @@ extern unomex::Result result;
     class mexModel
         : public unomex::DataModel
     {
+        friend class mexCallbacks;
         std::size_t _n{};
         std::size_t _m{};
         
         matlab::data::StructArray _funcs;
         matlab::data::StructArray _varInfo;
+        bool _has_intermediate_callback{false};
 
         public:
         mexModel(std::size_t nVar, std::size_t nCon, matlab::data::StructArray &varInfo, matlab::data::StructArray &funcs) 
@@ -562,5 +565,73 @@ nohesnz:
             return static_cast<std::size_t>(utilities::getscalar<double>(retval[0]));
         }
 
+    };
+
+
+    class mexCallbacks
+        : public uno::UserCallbacks
+    {
+        matlab::data::StructArray _callbacks;
+        bool _has_acceptable_iterate_callback{false};
+        bool _has_new_primals_callback{false};
+        bool _has_new_multipliers_callback{false};
+        public:
+        mexCallbacks(matlab::data::StructArray &callbacks) : _callbacks(std::move(callbacks)) {
+            if (utilities::isfield(_callbacks, "acceptable_iterate_callback")) {
+                matlab::data::Array icb = utilities::getfield(_callbacks, "acceptable_iterate_callback");
+                if (!utilities::ishandle(icb))
+                    utilities::error("The acceptable_iterate_callback field on funcs must be a function handle taking x, sigma and lambda as inputs");
+                _has_acceptable_iterate_callback = true;
+            }
+            
+            if (utilities::isfield(_callbacks, "new_primals_callback")) {
+                matlab::data::Array npc = utilities::getfield(_callbacks, "new_primals_callback");
+                if (!utilities::ishandle(npc))
+                    utilities::error("The new_primals_callback field on funcs must be a function handle taking x, sigma and lambda as inputs");
+                _has_new_primals_callback = true;
+            }
+
+            if (utilities::isfield(_callbacks, "new_multipliers_callback")) {
+                matlab::data::Array nmc = utilities::getfield(_callbacks, "new_multipliers_callback");
+                if (!utilities::ishandle(nmc))
+                    utilities::error("The new_multipliers_callback field on funcs must be a function handle taking x, sigma and lambda as inputs");
+                _has_new_multipliers_callback = true;
+            }
+        }
+            
+
+        void notify_acceptable_iterate(const uno::Vector<double>& primals, const uno::Multipliers& multipliers, double objective_multiplier) override {
+            
+            if (_has_acceptable_iterate_callback) {
+                
+                matlab::data::ArrayDimensions dimsX = {primals.size(),1};
+                matlab::data::ArrayDimensions dimsLambda = {multipliers.constraints.size(),1};
+                matlab::data::ArrayFactory f;
+                matlab::data::TypedArray<double> _x = f.createArray<double>(dimsX);
+                matlab::data::TypedArray<double> _lambda = f.createArray<double>(dimsLambda);            
+                std::copy(primals.begin(), primals.end(), _x.begin());
+                std::copy(multipliers.constraints.begin(), multipliers.constraints.end(), _lambda.begin());
+                utilities::feval(_callbacks[0]["acceptable_iterate_callback"], 0, {_x, _lambda});
+            }
+        }
+        void notify_new_primals(const uno::Vector<double>& primals) override {
+            if (_has_new_primals_callback) {
+                matlab::data::ArrayDimensions dimsX = {primals.size(),1};
+                matlab::data::ArrayFactory f;
+                matlab::data::TypedArray<double> _x = f.createArray<double>(dimsX);
+                std::copy(primals.begin(), primals.end(), _x.begin());
+                utilities::feval(_callbacks[0]["new_primals_callback"], 0, {_x});
+            }
+        }
+        
+        void notify_new_multipliers(const uno::Multipliers& multipliers) override {
+            if (_has_new_multipliers_callback) {
+                matlab::data::ArrayDimensions dimsLambda = {multipliers.constraints.size(),1};
+                matlab::data::ArrayFactory f;
+                matlab::data::TypedArray<double> _lambda = f.createArray<double>(dimsLambda);            
+                std::copy(multipliers.constraints.begin(), multipliers.constraints.end(), _lambda.begin());
+                utilities::feval(_callbacks[0]["new_multipliers_callback"], 0, {_lambda});
+            }
+        }
     };
 } // namespace unomex
