@@ -15,9 +15,15 @@ variableInfo.uBnds = [5;5];
 variableInfo.clBnds = -inf;
 variableInfo.cuBnds = -2;
 
+callbacks = struct;
+% callbacks.acceptable_iterate_callback = @(x,lambda,sigma)disp("acceptable Iterate");
+% callbacks.new_primals_callback = @(x)disp("new primals");
+% callbacks.new_multipliers_callback = @(lambda)disp("new duals");
+
 unostr.options = options;
 unostr.funcs = funcs;
 unostr.variableInfo = variableInfo;
+unostr.callbacks = callbacks;
 
 res = uno_mex(unostr);
 
