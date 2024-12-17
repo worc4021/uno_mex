@@ -94,25 +94,25 @@ public:
         unomex::mexCallbacks mexcallbacks(callbacks);
 
         // // // solve the instance
-        uno.solve(*model, initial_iterate, options, mexcallbacks);
+        uno::Result result = uno.solve(*model, initial_iterate, options, mexcallbacks);
 
         matlab::data::StructArray retVal = factory.createStructArray({1,1}, {"solution", "cpu_time", "termination_status"});
         matlab::data::StructArray sol = factory.createStructArray({1,1}, {"primals", "duals_lb_x", "duals_ub_x", "duals_constraints"});
-        matlab::data::TypedArray<double> x = factory.createArray<double>({unomex::result.number_variables, 1});
-        std::copy(unomex::result.solution.primals.begin(), unomex::result.solution.primals.end(), x.begin());
+        matlab::data::TypedArray<double> x = factory.createArray<double>({result.number_variables, 1});
+        std::copy(result.solution.primals.begin(), result.solution.primals.end(), x.begin());
         sol[0]["primals"] = std::move(x);
-        matlab::data::TypedArray<double> zL = factory.createArray<double>({unomex::result.number_variables, 1});
-        std::copy(unomex::result.solution.duals_lb_x.begin(), unomex::result.solution.duals_lb_x.end(), zL.begin());
+        matlab::data::TypedArray<double> zL = factory.createArray<double>({result.number_variables, 1});
+        std::copy(result.solution.multipliers.lower_bounds.begin(), result.solution.multipliers.lower_bounds.end(), zL.begin());
         sol[0]["duals_lb_x"] = std::move(zL);
-        matlab::data::TypedArray<double> zU = factory.createArray<double>({unomex::result.number_variables, 1});
-        std::copy(unomex::result.solution.duals_ub_x.begin(), unomex::result.solution.duals_ub_x.end(), zU.begin());
+        matlab::data::TypedArray<double> zU = factory.createArray<double>({result.number_variables, 1});
+        std::copy(result.solution.multipliers.upper_bounds.begin(), result.solution.multipliers.upper_bounds.end(), zU.begin());
         sol[0]["duals_ub_x"] = std::move(zU);
-        matlab::data::TypedArray<double> zC = factory.createArray<double>({unomex::result.number_constraints, 1});
-        std::copy(unomex::result.solution.duals_constraints.begin(), unomex::result.solution.duals_constraints.end(), zC.begin());
+        matlab::data::TypedArray<double> zC = factory.createArray<double>({result.number_constraints, 1});
+        std::copy(result.solution.multipliers.constraints.begin(), result.solution.multipliers.constraints.end(), zC.begin());
         sol[0]["duals_constraints"] = std::move(zC);
         retVal[0]["solution"] = std::move(sol);
-        retVal[0]["cpu_time"] = factory.createScalar(unomex::result.cpu_time);
-        retVal[0]["termination_status"] = factory.createScalar(uno::status_to_message(unomex::result.termination_status));
+        retVal[0]["cpu_time"] = factory.createScalar(result.cpu_time);
+        retVal[0]["termination_status"] = factory.createScalar(uno::optimization_status_to_message(result.optimization_status));
         
         outputs[0] = std::move(retVal);
     }

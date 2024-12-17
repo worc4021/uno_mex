@@ -11,6 +11,7 @@ include($ENV{CMAKE_INSTALL_PREFIX}/cmake/GKlibTargets.cmake)
 include($ENV{CMAKE_INSTALL_PREFIX}/cmake/metisTargets.cmake)
 include($ENV{CMAKE_INSTALL_PREFIX}/cmake/bqpdTargets.cmake)
 include($ENV{CMAKE_INSTALL_PREFIX}/cmake/mumpsTargets.cmake)
+include($ENV{CMAKE_INSTALL_PREFIX}/cmake/coinhslTargets.cmake)
 include($ENV{CMAKE_INSTALL_PREFIX}/cmake/unoTargets.cmake)
 include($ENV{CMAKE_INSTALL_PREFIX}/cmake/MexUtilities.cmake)
 

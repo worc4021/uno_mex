@@ -35,14 +35,14 @@ namespace unomex
         size_t number_variables;
         size_t number_constraints;
         double cpu_time;
-        uno::TerminationStatus termination_status;
+        uno::OptimizationStatus termination_status;
         
         Result(std::size_t number_variables, std::size_t number_constraints)
             : solution(number_variables, number_constraints)
             , number_variables(number_variables)
             , number_constraints(number_constraints)
             , cpu_time(0.)
-            , termination_status(uno::TerminationStatus::NOT_OPTIMAL)
+            , termination_status(uno::OptimizationStatus::ITERATION_LIMIT)
         {
         }
         Result() = default;
@@ -189,14 +189,8 @@ extern unomex::Result result;
             return _constraint_type[constraint_index];
         }
 
-        void postprocess_solution(uno::Iterate &iterate, uno::TerminationStatus termination_status) const override {
-            std::copy(iterate.primals.begin(), iterate.primals.end(), result.solution.primals.begin());
-            std::copy(iterate.multipliers.lower_bounds.begin(), iterate.multipliers.lower_bounds.end(), result.solution.duals_lb_x.begin());
-            std::copy(iterate.multipliers.upper_bounds.begin(), iterate.multipliers.upper_bounds.end(), result.solution.duals_ub_x.begin());
-            std::copy(iterate.multipliers.constraints.begin(), iterate.multipliers.constraints.end(), result.solution.duals_constraints.begin());
+        void postprocess_solution([[maybe_unused]]uno::Iterate &iterate, [[maybe_unused]]uno::IterateStatus termination_status) const override {
             
-            result.cpu_time = _timer.get_duration();
-            result.termination_status = termination_status;
         }
 
         void initialise_from_data()
