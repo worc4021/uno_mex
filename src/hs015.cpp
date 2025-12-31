@@ -5,6 +5,54 @@
 #include <stdexcept>
 #include "Uno_C_API.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+static uno_int objective_function(	uno_int /*number_variables*/, 
+							const double* x, 
+							double* objective_value, 
+							void* /*user_data*/);
+
+static uno_int constraint_functions(	uno_int /*number_variables*/, 
+								uno_int /*number_constraints*/, 
+								const double* x,
+								double* constraint_values, 
+								void* /*user_data*/);
+
+static uno_int objective_gradient(	uno_int /*number_variables*/, 
+							const double* x, 
+							double* gradient, 
+							void* /*user_data*/);
+
+static uno_int constraint_jacobian(	uno_int /*number_variables*/, 
+								uno_int /*number_jacobian_nonzeros*/, 
+								const double* x,
+								double* jacobian, 
+								void* /*user_data*/);
+
+static uno_int lagrangian_hessian(	uno_int /*number_variables*/, 
+							uno_int /*number_constraints*/, 
+							uno_int /*number_hessian_nonzeros*/,
+      						const double* x, 
+							double objective_multiplier, 
+							const double* multipliers, 
+							double* hessian, 
+							void* /*user_data*/);
+
+static uno_int lagrangian_hessian_operator(uno_int number_variables, 
+									uno_int number_constraints, 
+									const double* x,
+      								bool evaluate_at_x, 
+									double objective_multiplier, 
+									const double* multipliers, 
+									const double* vector,
+      								double* result, 
+									void* user_data);
+
+#ifdef __cplusplus
+}
+#endif
+
 uno_int objective_function(	uno_int /*number_variables*/, 
 							const double* x, 
 							double* objective_value, 
@@ -110,6 +158,13 @@ int main() {
 	const double lagrangian_sign_convention = UNO_MULTIPLIER_NEGATIVE;
 	// initial point
 	double x0[] = {-2., 1.};
+
+	Objective objective_function = ::objective_function;
+	Constraints constraint_functions = ::constraint_functions;
+	ObjectiveGradient objective_gradient = ::objective_gradient;
+	Jacobian constraint_jacobian = ::constraint_jacobian;
+	Hessian lagrangian_hessian = ::lagrangian_hessian;
+	HessianOperator lagrangian_hessian_operator = ::lagrangian_hessian_operator;
 
 	void* model = uno_create_model(UNO_PROBLEM_NONLINEAR, number_variables, variables_lower_bounds,
       variables_upper_bounds, base_indexing);
