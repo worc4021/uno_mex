@@ -5,7 +5,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
     && apt install --no-install-recommends -y \
         ca-certificates gnupg2 openssh-client git sudo wget \
-        python3 python3-pip python3-venv xvfb mold libgomp1 \
+        python3 python3-pip python3-venv xvfb mold libgomp1 gdb \
         gcc-14 g++-14 gfortran-14 cmake ninja-build build-essential \
     && apt-get clean \
     && apt-get -y autoremove \
