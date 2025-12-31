@@ -2,10 +2,14 @@ cmake_minimum_required(VERSION 3.25)
 project(UnoMex)
 
 include(GNUInstallDirs)
-set(MKL_LINK static)
-set(MKL_THREADING sequential)
-set(MKL_INTERFACE lp64)
-find_package(MKL REQUIRED)
+if (WIN32)
+    set(MKL_LINK static)
+    set(MKL_THREADING sequential)
+    set(MKL_INTERFACE lp64)
+    find_package(MKL REQUIRED)
+else()
+    find_package(OpenBLAS)
+endif()
 
 
 include(FetchContent)
@@ -39,11 +43,11 @@ FetchContent_Declare(
     EXCLUDE_FROM_ALL
 )
 
-FetchContent_MakeAvailable(MexUtilities BQPD MUMPS coinhsl)
+FetchContent_MakeAvailable(BQPD MUMPS coinhsl) # MexUtilities
 
 add_subdirectory(uno)
 
-find_package(Matlab REQUIRED)
+# find_package(Matlab REQUIRED)
 
 add_executable(hs015 src/hs015.cpp)
 target_link_libraries(hs015 PRIVATE unolib)
