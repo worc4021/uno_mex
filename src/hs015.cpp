@@ -1,5 +1,4 @@
 #include <cassert>
-#include <cstdbool>
 #include <cstdio>
 #include <cmath>
 #include <stdexcept>
@@ -155,28 +154,23 @@ int main() {
 	const char hessian_triangular_part = UNO_LOWER_TRIANGLE;
 	uno_int hessian_row_indices[] = {0, 1, 1};
 	uno_int hessian_column_indices[] = {0, 0, 1};
-	const double lagrangian_sign_convention = UNO_MULTIPLIER_NEGATIVE;
+	const uno_int lagrangian_sign_convention = UNO_MULTIPLIER_NEGATIVE;
 	// initial point
 	double x0[] = {-2., 1.};
 
-	Objective objective_function = ::objective_function;
-	Constraints constraint_functions = ::constraint_functions;
-	ObjectiveGradient objective_gradient = ::objective_gradient;
-	Jacobian constraint_jacobian = ::constraint_jacobian;
-	Hessian lagrangian_hessian = ::lagrangian_hessian;
-	HessianOperator lagrangian_hessian_operator = ::lagrangian_hessian_operator;
-
 	void* model = uno_create_model(UNO_PROBLEM_NONLINEAR, number_variables, variables_lower_bounds,
       variables_upper_bounds, base_indexing);
-	if (!uno_set_objective(model, optimization_sense, objective_function, objective_gradient))
+	if (!uno_set_objective(model, optimization_sense, ::objective_function, ::objective_gradient))
 		throw std::runtime_error("Failed to set objective.");
-	if (!uno_set_constraints(model, number_constraints, constraint_functions,
+	if (!uno_set_constraints(model, number_constraints, ::constraint_functions,
 		constraints_lower_bounds, constraints_upper_bounds, number_jacobian_nonzeros,
-		jacobian_row_indices, jacobian_column_indices, constraint_jacobian))
+		jacobian_row_indices, jacobian_column_indices, ::constraint_jacobian))
 		throw std::runtime_error("Failed to set constraints.");
 	if (!uno_set_lagrangian_hessian(model, number_hessian_nonzeros, hessian_triangular_part, hessian_row_indices,
-		hessian_column_indices, lagrangian_hessian, lagrangian_sign_convention))
+		hessian_column_indices, ::lagrangian_hessian))
 		throw std::runtime_error("Failed to set lagrangian hessian.");
+	if (!uno_set_lagrangian_sign_convention(model, lagrangian_sign_convention))
+		throw std::runtime_error("Failed to set lagrangian sign convention.");
 /*
 	assert(uno_set_lagrangian_hessian_operator(model, lagrangian_hessian_operator, lagrangian_sign_convention));
 */

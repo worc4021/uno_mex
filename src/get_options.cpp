@@ -1,45 +1,38 @@
 #include "mex.hpp"
 #include "mexAdapter.hpp"
 #include "utilities.hpp"
-#include "options/Options.hpp"
-#include "options/Presets.hpp"
-#include "options/DefaultOptions.hpp"
+#include "Uno_C_API.h"
+#include "mex_problem.hpp"
 
-class MexFunction 
-    : public matlab::mex::Function 
-{
-    matlab::data::ArrayFactory factory;
-    
+class MexFunction : public matlab::mex::Function {
+   matlab::data::ArrayFactory factory;
+
 public:
-    MexFunction()  {
-        matlabPtr = getEngine();
-    }
-    ~MexFunction() = default;
-    void operator()(matlab::mex::ArgumentList outputs, matlab::mex::ArgumentList inputs) {
-        
-        uno::Options solvers_options = uno::DefaultOptions::determine_solvers();
-        if (inputs.size())
-        {
-            if (!utilities::isstring(inputs[0]))
-            {
-                utilities::error("Pass a string with the preset name.");
-            }
-            std::string preset = utilities::getstringvalue(inputs[0]);
-            uno::Options solver_preset = uno::Presets::get_preset_options(preset);
-            solvers_options.overwrite_with(solver_preset);
-        }
+   MexFunction() {
+      matlabPtr = getEngine();
+   }
 
-        std::vector<std::string> option_names;
-        for (const auto &elem : solvers_options)
-        {
-            option_names.push_back(elem.first);
-        }
+   void operator()(matlab::mex::ArgumentList outputs, matlab::mex::ArgumentList inputs) {
+      void* solver = uno_create_solver();
+      if (solver == nullptr) {
+         utilities::errWithId("cApiFailure", "uno_create_solver failed.");
+      }
 
-        matlab::data::StructArray options = factory.createStructArray({1, 1}, option_names);
-        for (const auto &elem : solvers_options)
-        {
-            options[0][elem.first] = factory.createScalar(elem.second);
-        }
-        outputs[0] = std::move(options);
-    }
+      if (inputs.size() > 0) {
+         if (!utilities::isstring(inputs[0])) {
+            uno_destroy_solver(solver);
+            utilities::errWithId("invalidInput", "Pass a string with the preset name.");
+         }
+         const std::string preset = utilities::getstringvalue(inputs[0]);
+         if (!uno_set_solver_preset(solver, preset.c_str())) {
+            uno_destroy_solver(solver);
+            utilities::errWithId("invalidPreset", "Failed to set preset '{}'.", preset);
+         }
+      }
+
+      outputs[0] = unomex::export_solver_options(solver, factory);
+      uno_destroy_solver(solver);
+   }
 };
+
+#include "mex_problem.cpp"
