@@ -21,7 +21,8 @@ include(UnoDeps)
 enable_language(Fortran)
 find_package(OpenMP REQUIRED)
 
-find_package(Uno CONFIG REQUIRED)
+include(UnoSources)
+
 find_package(MexUtilities CONFIG REQUIRED)
 
 # bqpd install exports a bogus INSTALL_INTERFACE path "/bqpd" (missing prefix).
@@ -35,26 +36,28 @@ foreach(_bqpd_tgt IN ITEMS bqpd::bqpd_sparse bqpd::bqpd_dense)
    endif()
 endforeach()
 
+if(NOT TARGET uno::uno_static)
+   message(FATAL_ERROR "uno::uno_static is not available after UnoSources")
+endif()
+
+set(_uno_c_include "${UNO_MEX_UNO_SOURCE_DIR}/interfaces/C")
+set(_uno_cpp_include "${UNO_MEX_UNO_SOURCE_DIR}/uno")
+if(NOT EXISTS "${_uno_cpp_include}/ingredients/subproblem_solvers/LPSolverFactory.hpp")
+   message(FATAL_ERROR
+      "Uno C++ sources not found for uno_mex (expected under ${_uno_cpp_include})")
+endif()
+
+if(UNO_MEX_USE_INSTALLED_UNO)
+   set(_uno_public_include "${UNO_UNO_INSTALL}/include/uno")
+else()
+   set(_uno_public_include "${_uno_c_include}")
+endif()
+
 add_executable(hs015 src/hs015.cpp)
-target_include_directories(hs015 PRIVATE "${UNO_UNO_INSTALL}/include/uno")
+target_include_directories(hs015 PRIVATE "${_uno_public_include}")
 target_link_libraries(hs015 PRIVATE uno::uno_static)
 if(MINGW)
    target_compile_options(hs015 PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
-endif()
-
-set(_uno_mex_include "${UNO_UNO_INSTALL}/include/uno")
-get_filename_component(_uno_cpp_include "${UNO_UNO_INSTALL}/../../../uno" ABSOLUTE)
-if(NOT EXISTS "${_uno_cpp_include}/ingredients/subproblem_solvers/LPSolverFactory.hpp")
-   foreach(_uno_root IN LISTS UNO_DEPS_ROOT)
-      set(_candidate "${_uno_root}/Uno/uno")
-      if(EXISTS "${_candidate}/ingredients/subproblem_solvers/LPSolverFactory.hpp")
-         set(_uno_cpp_include "${_candidate}")
-         break()
-      endif()
-   endforeach()
-endif()
-if(NOT EXISTS "${_uno_cpp_include}/ingredients/subproblem_solvers/LPSolverFactory.hpp")
-   message(FATAL_ERROR "Uno C++ sources not found for uno_mex (expected under ${_uno_cpp_include})")
 endif()
 
 matlab_add_mex(
@@ -63,7 +66,7 @@ matlab_add_mex(
    LINK_TO MexUtilities::MexUtilities uno::uno_static
    R2018a
 )
-target_include_directories(uno_mex PRIVATE "${_uno_mex_include}" "${_uno_cpp_include}")
+target_include_directories(uno_mex PRIVATE "${_uno_public_include}" "${_uno_cpp_include}")
 if(MINGW)
    target_compile_options(uno_mex PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
 endif()
@@ -74,7 +77,12 @@ matlab_add_mex(
    LINK_TO MexUtilities::MexUtilities uno::uno_static
    R2018a
 )
-target_include_directories(uno_options PRIVATE "${_uno_mex_include}")
+target_include_directories(uno_options PRIVATE "${_uno_public_include}")
 if(MINGW)
    target_compile_options(uno_options PRIVATE -finput-charset=UTF-8 -fexec-charset=UTF-8)
+endif()
+
+if(UNO_MEX_BUILD_UNO_TESTS)
+   include(CTest)
+   enable_testing()
 endif()

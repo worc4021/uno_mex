@@ -13,7 +13,7 @@ get_filename_component(_uno_mex_inferred_preset "${CMAKE_BINARY_DIR}" NAME)
 set(UNO_DEPS_PRESET "${_uno_mex_inferred_preset}" CACHE STRING
    "Subdirectory name under each sibling's out/install/ tree to consume")
 
-foreach(_uno_dep IN ITEMS Uno HiGHS METIS bqpd_lib coinhsl MUMPS_cmake GKlib OpenBLAS)
+foreach(_uno_dep IN ITEMS HiGHS METIS bqpd_lib coinhsl MUMPS_cmake GKlib OpenBLAS)
    string(TOUPPER ${_uno_dep} _uno_dep_upper)
 
    set(_uno_dep_default "")
