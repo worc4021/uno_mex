@@ -1,4 +1,5 @@
 options = uno_options("ipopt");
+options.QP_solver = "HiGHS";
 
 funcs.objective = @objective;
 funcs.gradient = @gradient;
@@ -7,7 +8,7 @@ funcs.jacobian = @jacobian;
 funcs.hessian = @hessian;
 funcs.gradient_nonzeros = @()2;
 funcs.jacobian_nonzeros = @()2;
-funcs.hessian_nonzeros = @()4;
+funcs.hessian_nonzeros = @()3;
 
 variableInfo.x0 = [3;2];
 variableInfo.lBnds = [-5;-5];
@@ -72,5 +73,5 @@ H = [12*x^2 + 4*y - 42,4*x + 4*y;
     4*x + 4*y,12*y^2 + 4*x - 26];
 C = [sin(x), 0;
      0, 0];
-hVal = sparse(sigma*H - lambda(1)*C);
+hVal = tril(sparse(sigma*H - lambda(1)*C));
 end

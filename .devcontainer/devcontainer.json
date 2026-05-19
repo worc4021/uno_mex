@@ -1,0 +1,33 @@
+{
+    "name": "Uno.Mex",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".",
+        "args": {
+            "USERNAME": "${localEnv:USER}"
+        }
+    },
+    "runArgs": [
+        "--shm-size=512m",
+        "--mac-address=00:15:5d:dc:72:0c"
+    ],
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "workspaceFolder": "/workspace",
+    "mounts": [
+        "source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind,consistency=cached"
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-vscode.cpptools-extension-pack",
+                "MathWorks.language-matlab",
+                "GitHub.copilot",
+                "eamodio.gitlens"
+            ]
+        }
+    },
+    "remoteUser": "${localEnv:USER}",
+    "remoteEnv": {
+        "SSH_AUTH_SOCK": "/ssh-agent"
+    }
+}

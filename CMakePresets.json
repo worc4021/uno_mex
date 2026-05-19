@@ -2,6 +2,14 @@
     "version": 6,
     "configurePresets": [
         {
+            "name": "uno-mex-in-tree",
+            "hidden": true,
+            "cacheVariables": {
+                "UNO_MEX_USE_INSTALLED_UNO": "OFF",
+                "UNO_MEX_BUILD_UNO_TESTS": "ON"
+            }
+        },
+        {
             "name": "config-base",
             "hidden": true,
             "generator": "Ninja",
@@ -105,16 +113,16 @@
             "inherits": "config-base",
             "displayName": "linux GCC base",
             "cacheVariables": {
-                "CMAKE_C_COMPILER": "gcc-14",
-                "CMAKE_CXX_COMPILER": "g++-14",
-                "CMAKE_Fortran_COMPILER": "gfortran-14"
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_Fortran_COMPILER": "gfortran"
             },
             "hidden": true
         },
         {
             "name": "linux-gcc-release-config",
             "displayName": "linux GCC Release",
-            "inherits": ["linux-gcc-base","linux-conifg-base"],
+            "inherits": ["linux-gcc-base","linux-conifg-base","uno-mex-in-tree"],
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
@@ -122,7 +130,7 @@
         {
             "name": "linux-gcc-debug-config",
             "displayName": "linux GCC Debug",
-            "inherits": ["linux-gcc-base","linux-conifg-base"],
+            "inherits": ["linux-gcc-base","linux-conifg-base","uno-mex-in-tree"],
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
             }
@@ -130,9 +138,26 @@
         {
             "name": "windows-gcc-release-config",
             "displayName": "windows GCC Release",
-            "inherits": ["linux-gcc-base","windows-conifg-base"],
+            "inherits": ["linux-gcc-base","windows-conifg-base","uno-mex-in-tree"],
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "UNO_DEPS_ROOT": "C:/repos/Uno",
+                "UNO_MEX_UNO_SOURCE_DIR": "C:/repos/Uno/Uno",
+                "UNO_OPENBLAS_INSTALL": "C:/repos/Ipopt/OpenBLAS/out/install/windows-gcc-release-config",
+                "UNO_MEXUTILITIES_INSTALL": "C:/repos/MexUtilities/out/install/windows-gcc-release-config"
+            }
+        },
+        {
+            "name": "windows-gcc-debug-config",
+            "displayName": "windows GCC Debug",
+            "inherits": ["linux-gcc-base","windows-conifg-base","uno-mex-in-tree"],
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "UNO_DEPS_ROOT": "C:/repos/Uno",
+                "UNO_MEX_UNO_SOURCE_DIR": "C:/repos/Uno/Uno",
+                "UNO_DEPS_PRESET": "windows-gcc-release-config",
+                "UNO_OPENBLAS_INSTALL": "C:/repos/Ipopt/OpenBLAS/out/install/windows-gcc-release-config",
+                "UNO_MEXUTILITIES_INSTALL": "C:/repos/MexUtilities/out/install/windows-gcc-release-config"
             }
         },
         {
@@ -230,6 +255,12 @@
             "displayName": "windows GCC Release"
         },
         {
+            "name": "windows-gcc-debug-build",
+            "inherits": "windows-build-base",
+            "configurePreset": "windows-gcc-debug-config",
+            "displayName": "windows GCC Debug"
+        },
+        {
             "name": "linux-gcc-release-build",
             "inherits": "linux-build-base",
             "configurePreset": "linux-gcc-release-config",
@@ -299,6 +330,12 @@
             "inherits": ["test-base","test-windows"],
             "configurePreset": "windows-msvc-release-config",
             "displayName": "MSVC Release"
+        },
+        {
+            "name": "windows-gcc-release-test",
+            "inherits": ["test-base","test-windows"],
+            "configurePreset": "windows-gcc-release-config",
+            "displayName": "windows GCC Release"
         },
         {
             "name": "linux-gcc-release-test",
