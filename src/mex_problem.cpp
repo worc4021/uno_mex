@@ -1,9 +1,12 @@
 #include "mex_problem.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 
 #include "mex.hpp"
 #include "utilities.hpp"
@@ -35,6 +38,25 @@ void fill_coo_from_sparse(const utilities::Sparse<double>& sparse, std::vector<u
       row[k] = static_cast<uno_int>(rows[k]);
       col[k] = static_cast<uno_int>(cols[k]);
    }
+}
+
+void setup_dense_lower_hessian_pattern(std::size_t n, std::optional<utilities::Sparse<double>>& sparse,
+   std::vector<uno_int>& row, std::vector<uno_int>& col) {
+   const std::size_t nnz = n * (n + 1) / 2;
+   std::vector<std::size_t> rows(nnz);
+   std::vector<std::size_t> cols(nnz);
+   std::vector<double> values(nnz, 0.);
+   std::size_t k = 0;
+   for (std::size_t j = 0; j < n; ++j) {
+      for (std::size_t i = j; i < n; ++i) {
+         rows[k] = i;
+         cols[k] = j;
+         ++k;
+      }
+   }
+   sparse.emplace(n, n);
+   sparse->set(std::span(rows), std::span(cols), std::span(values));
+   fill_coo_from_sparse(*sparse, row, col);
 }
 
 void emplace_lower_triangle_pattern(std::optional<utilities::Sparse<double>>& sparse, const matlab::data::Array& array) {
@@ -77,9 +99,91 @@ void require_sparse(const matlab::data::Array& array, const char* callback_name)
    }
 }
 
+void require_jacobian_sparse(const matlab::data::Array& array, std::size_t n_con, std::size_t n_var, const char* callback_name) {
+   require_sparse(array, callback_name);
+   matlab::data::SparseArray<double> sparse(array);
+   const auto dims = sparse.getDimensions();
+   if (dims[0] != n_con || dims[1] != n_var) {
+      utilities::errWithId("dimensionMismatch",
+         "The {} callback must return a sparse {}-by-{} matrix (constraints-by-variables) but returned {}-by-{}.",
+         callback_name, n_con, n_var, dims[0], dims[1]);
+   }
+}
+
+void require_square_sparse(const matlab::data::Array& array, std::size_t n, const char* callback_name) {
+   require_sparse(array, callback_name);
+   matlab::data::SparseArray<double> sparse(array);
+   const auto dims = sparse.getDimensions();
+   if (dims[0] != n || dims[1] != n) {
+      utilities::errWithId("dimensionMismatch",
+         "The {} callback must return a sparse {}-by-{} matrix but returned {}-by-{}.", callback_name, n, n,
+         dims[0], dims[1]);
+   }
+}
+
+void require_scalar(const matlab::data::Array& array, const char* callback_name) {
+   if (!utilities::isnumeric(array)) {
+      utilities::errWithId("expectedScalar", "The {} callback must return a numeric scalar.", callback_name);
+   }
+   if (array.getNumberOfElements() != 1) {
+      utilities::errWithId("dimensionMismatch", "The {} callback must return a scalar but returned {} elements.",
+         callback_name, array.getNumberOfElements());
+   }
+}
+
+void require_vector_length(const matlab::data::Array& array, std::size_t length, const char* callback_name) {
+   if (utilities::issparse(array)) {
+      matlab::data::SparseArray<double> sparse(array);
+      const auto dims = sparse.getDimensions();
+      const bool column_vector = dims[0] == length && dims[1] == 1;
+      const bool row_vector = dims[0] == 1 && dims[1] == length;
+      if (!column_vector && !row_vector) {
+         utilities::errWithId("dimensionMismatch",
+            "The {} callback must return a sparse vector with {} elements ({}-by-1 or 1-by-{}) but returned {}-by-{}.",
+            callback_name, length, length, length, dims[0], dims[1]);
+      }
+      return;
+   }
+   if (!utilities::isvector(array)) {
+      utilities::errWithId("expectedVector", "The {} callback must return a vector with {} elements.", callback_name,
+         length);
+   }
+   if (array.getNumberOfElements() != length) {
+      utilities::errWithId("dimensionMismatch", "The {} callback must return {} elements but returned {}.", callback_name,
+         length, array.getNumberOfElements());
+   }
+}
+
+void fill_vector_from_array(const matlab::data::Array& array, double* values, std::size_t length, const char* callback_name) {
+   require_vector_length(array, length, callback_name);
+   if (utilities::issparse(array)) {
+      matlab::data::SparseArray<double> sparse(array);
+      const auto dims = sparse.getDimensions();
+      const bool column_vector = dims[0] == length && dims[1] == 1;
+      for (auto it = sparse.cbegin(); it != sparse.cend(); ++it) {
+         const matlab::data::SparseIndex idx = sparse.getIndex(it);
+         const std::size_t index = column_vector ? idx.first : idx.second;
+         if (index >= length) {
+            utilities::errWithId("dimensionMismatch",
+               "The {} callback returned an index outside the vector (length {}).", callback_name, length);
+         }
+         values[index] = *it;
+      }
+      return;
+   }
+   matlab::data::TypedArray<double> dense(array);
+   std::copy(dense.cbegin(), dense.cend(), values);
+}
+
 void update_pattern_values(utilities::Sparse<double>& pattern, const matlab::data::Array& array, const char* callback_name) {
    require_sparse(array, callback_name);
    matlab::data::SparseArray<double> sparse(array);
+   const auto dims = sparse.getDimensions();
+   if (dims[0] != pattern.getNumberOfRows() || dims[1] != pattern.getNumberOfColumns()) {
+      utilities::errWithId("dimensionMismatch",
+         "The {} callback must return a sparse {}-by-{} matrix but returned {}-by-{}.", callback_name,
+         pattern.getNumberOfRows(), pattern.getNumberOfColumns(), dims[0], dims[1]);
+   }
    pattern.updateValues(sparse);
 }
 
@@ -93,35 +197,18 @@ void copy_pattern_values(const utilities::Sparse<double>& pattern, double* value
    std::copy(buffer.begin(), buffer.end(), values);
 }
 
-void scatter_sparse_into_dense(const matlab::data::Array& array, double* dense, std::size_t length, const char* callback_name) {
-   if (utilities::issparse(array)) {
-      utilities::Sparse<double> sparse;
-      sparse.set(array);
-      const std::size_t nnz = sparse.getNumberOfNonZeroElements();
-      if (nnz > 0) {
-         std::vector<std::size_t> rows(nnz);
-         std::vector<double> values(nnz);
-         sparse.iRow(std::span(rows));
-         sparse.val(std::span(values));
-         for (std::size_t k = 0; k < nnz; ++k) {
-            if (rows[k] >= length) {
-               utilities::errWithId("dimensionMismatch",
-                  "The {} callback returned an index outside the primal vector (length {}).", callback_name, length);
-            }
-            dense[rows[k]] = values[k];
-         }
-      }
-      return;
+void validate_nlp_callbacks_at_x0(MexProblemContext& context) {
+   matlab::data::TypedArray<double> x = make_x_vector(context.x0.data(), context.number_variables);
+   auto objective_out = utilities::feval(context.funcs[0]["objective"], 1, {x});
+   require_scalar(objective_out[0], "objective");
+
+   auto gradient_out = utilities::feval(context.funcs[0]["gradient"], 1, {x});
+   require_vector_length(gradient_out[0], context.number_variables, "gradient");
+
+   if (context.number_constraints > 0) {
+      auto constraints_out = utilities::feval(context.funcs[0]["constraints"], 1, {x});
+      require_vector_length(constraints_out[0], context.number_constraints, "constraints");
    }
-   if (!utilities::isvector(array)) {
-      utilities::errWithId("expectedVector", "The {} callback must return a sparse or dense vector.", callback_name);
-   }
-   matlab::data::TypedArray<double> dense_array(array);
-   if (dense_array.getNumberOfElements() != length) {
-      utilities::errWithId("dimensionMismatch", "The {} callback must return {} elements but returned {}.", callback_name,
-         length, dense_array.getNumberOfElements());
-   }
-   std::copy(dense_array.cbegin(), dense_array.cend(), dense);
 }
 
 } // namespace
@@ -170,11 +257,11 @@ MexProblemContext::MexProblemContext(std::size_t n_var, std::size_t n_con, matla
    constraint_upper_bounds.assign(cu_bnds.cbegin(), cu_bnds.cend());
    validate_handles();
    build_sparsity_patterns();
+   validate_nlp_callbacks_at_x0(*this);
 }
 
 void MexProblemContext::validate_handles() const {
-   const char* required[] = {"objective", "gradient", "constraints", "jacobian", "jacobian_nonzeros", "hessian",
-      "hessian_nonzeros"};
+   const char* required[] = {"objective", "gradient", "constraints", "jacobian", "hessian"};
    for (const char* name : required) {
       if (!utilities::isfield(funcs, name)) {
          utilities::errWithId("missingField", "Field '{}' not supplied on funcs.", name);
@@ -182,6 +269,12 @@ void MexProblemContext::validate_handles() const {
       if (!utilities::ishandle(utilities::getfield(funcs, name))) {
          utilities::errWithId("invalidHandle", "The {} field on funcs must be a function handle.", name);
       }
+   }
+   if (utilities::isfield(funcs, "jacobian_nonzeros") || utilities::isfield(funcs, "hessian_nonzeros")
+      || utilities::isfield(funcs, "gradient_nonzeros")) {
+      utilities::warnWithId("deprecatedField",
+         "gradient_nonzeros, jacobian_nonzeros and hessian_nonzeros on funcs are deprecated; "
+         "supply optional scalar fields jacobianNnz and hessianNnz on variableInfo instead.");
    }
    if (!utilities::isfield(var_info, "lBnds")) {
       utilities::errWithId("missingField", "Field 'lBnds' not supplied.");
@@ -218,18 +311,47 @@ void MexProblemContext::validate_handles() const {
    }
 }
 
+namespace {
+
+std::optional<std::size_t> read_declared_nnz(const matlab::data::StructArray& var_info, const char* field_name) {
+   if (!utilities::isfield(var_info, field_name)) {
+      return std::nullopt;
+   }
+   const matlab::data::Array& value = var_info[0][field_name];
+   if (value.getType() != matlab::data::ArrayType::DOUBLE) {
+      utilities::errWithId("invalidField", "Field '{}' on variableInfo must be a numeric scalar.", field_name);
+   }
+   const double nnz = utilities::getscalar<double>(value);
+   if (nnz < 0. || std::floor(nnz) != nnz) {
+      utilities::errWithId("invalidField", "Field '{}' on variableInfo must be a nonnegative integer.", field_name);
+   }
+   return static_cast<std::size_t>(nnz);
+}
+
+std::optional<std::size_t> read_legacy_nnz_callback(const matlab::data::StructArray& funcs, const char* field_name) {
+   if (!utilities::isfield(funcs, field_name)) {
+      return std::nullopt;
+   }
+   return static_cast<std::size_t>(
+      utilities::getscalar<double>(utilities::feval(funcs[0][field_name], 1, {})[0]));
+}
+
+} // namespace
+
 void MexProblemContext::build_sparsity_patterns() {
    matlab::data::TypedArray<double> x = make_x_vector(x0.data(), number_variables);
    if (number_constraints > 0) {
       auto jac_out = utilities::feval(funcs[0]["jacobian"], 1, {x});
-      require_sparse(jac_out[0], "jacobian");
+      require_jacobian_sparse(jac_out[0], number_constraints, number_variables, "jacobian");
       jacobian_sparsity.set(jac_out[0]);
       fill_coo_from_sparse(jacobian_sparsity, jacobian_row, jacobian_col);
-      const auto expected_nnz = static_cast<std::size_t>(
-         utilities::getscalar<double>(utilities::feval(funcs[0]["jacobian_nonzeros"], 1, {})[0]));
-      if (jacobian_row.size() != expected_nnz) {
+      std::optional<std::size_t> declared = read_declared_nnz(var_info, "jacobianNnz");
+      if (!declared) {
+         declared = read_legacy_nnz_callback(funcs, "jacobian_nonzeros");
+      }
+      if (declared && jacobian_row.size() != *declared) {
          utilities::errWithId("sparsityMismatch",
-            "Jacobian nonzero count from jacobian_nonzeros ({}) does not match pattern at x0 ({}).", expected_nnz,
+            "variableInfo.jacobianNnz ({}) must equal the number of nonzeros in jacobian(x0) ({}).", *declared,
             jacobian_row.size());
       }
    }
@@ -239,14 +361,39 @@ void MexProblemContext::build_sparsity_patterns() {
       matlab::data::TypedArray<double> lambda = factory.createArray<double>({number_constraints, 1});
       std::fill(lambda.begin(), lambda.end(), 0.);
       auto hess_out = utilities::feval(funcs[0]["hessian"], 1, {x, sigma, lambda});
-      emplace_lower_triangle_pattern(hessian_sparsity, hess_out[0]);
-      fill_coo_from_sparse(*hessian_sparsity, hessian_row, hessian_col);
-      const auto expected_nnz = static_cast<std::size_t>(
-         utilities::getscalar<double>(utilities::feval(funcs[0]["hessian_nonzeros"], 1, {})[0]));
-      if (hessian_row.size() != expected_nnz) {
-         utilities::warnWithId("hessianSparsityMismatch",
-            "hessian_nonzeros reports {} but the lower-triangle pattern at x0 has {}; using the pattern at x0.",
-            expected_nnz, hessian_row.size());
+      require_square_sparse(hess_out[0], number_variables, "hessian");
+      matlab::data::SparseArray<double> hess_at_x0(hess_out[0]);
+      const std::size_t n = number_variables;
+      const std::size_t dense_lower_nnz = n * (n + 1) / 2;
+      std::optional<std::size_t> declared = read_declared_nnz(var_info, "hessianNnz");
+      if (!declared) {
+         declared = read_legacy_nnz_callback(funcs, "hessian_nonzeros");
+      }
+      if (declared) {
+         if (*declared > dense_lower_nnz) {
+            utilities::errWithId("sparsityMismatch",
+               "variableInfo.hessianNnz ({}) exceeds the maximum {} lower-triangle nonzeros of a dense {}-by-{} Hessian.",
+               *declared, dense_lower_nnz, n, n);
+         }
+         if (*declared == dense_lower_nnz) {
+            setup_dense_lower_hessian_pattern(n, hessian_sparsity, hessian_row, hessian_col);
+            hessian_sparsity->updateValues(hess_at_x0);
+         }
+         else {
+            emplace_lower_triangle_pattern(hessian_sparsity, hess_out[0]);
+            const std::size_t pattern_nnz = hessian_sparsity->getNumberOfNonZeroElements();
+            if (*declared != pattern_nnz) {
+               utilities::errWithId("sparsityMismatch",
+                  "variableInfo.hessianNnz ({}) must equal the number of lower-triangle nonzeros in hessian(x0) ({}), "
+                  "or be {} for a dense {}-by-{} lower triangle.",
+                  *declared, pattern_nnz, dense_lower_nnz, n, n);
+            }
+            fill_coo_from_sparse(*hessian_sparsity, hessian_row, hessian_col);
+         }
+      }
+      else {
+         emplace_lower_triangle_pattern(hessian_sparsity, hess_out[0]);
+         fill_coo_from_sparse(*hessian_sparsity, hessian_row, hessian_col);
       }
    }
 }
@@ -260,6 +407,7 @@ static uno_int objective_callback(uno_int number_variables, const double* x, dou
    try {
       matlab::data::TypedArray<double> mx = make_x_vector(x, static_cast<std::size_t>(number_variables));
       auto retval = utilities::feval(ctx->funcs[0]["objective"], 1, {mx});
+      require_scalar(retval[0], "objective");
       *objective_value = utilities::getscalar<double>(retval[0]);
       return 0;
    }
@@ -275,7 +423,7 @@ static uno_int gradient_callback(uno_int number_variables, const double* x, doub
       std::memset(gradient, 0, n * sizeof(double));
       matlab::data::TypedArray<double> mx = make_x_vector(x, n);
       auto retval = utilities::feval(ctx->funcs[0]["gradient"], 1, {mx});
-      scatter_sparse_into_dense(retval[0], gradient, n, "gradient");
+      fill_vector_from_array(retval[0], gradient, n, "gradient");
       return 0;
    }
    catch (...) {
@@ -289,11 +437,9 @@ static uno_int constraints_callback(uno_int number_variables, uno_int number_con
    try {
       matlab::data::TypedArray<double> mx = make_x_vector(x, static_cast<std::size_t>(number_variables));
       auto retval = utilities::feval(ctx->funcs[0]["constraints"], 1, {mx});
-      matlab::data::TypedArray<double> cons = std::move(retval[0]);
-      if (cons.getNumberOfElements() != static_cast<std::size_t>(number_constraints)) {
-         return 1;
-      }
-      std::copy(cons.cbegin(), cons.cend(), constraint_values);
+      const auto m = static_cast<std::size_t>(number_constraints);
+      std::memset(constraint_values, 0, m * sizeof(double));
+      fill_vector_from_array(retval[0], constraint_values, m, "constraints");
       return 0;
    }
    catch (...) {
@@ -301,12 +447,18 @@ static uno_int constraints_callback(uno_int number_variables, uno_int number_con
    }
 }
 
-static uno_int jacobian_callback(uno_int /*number_variables*/, uno_int /*number_jacobian_nonzeros*/, const double* x,
+static uno_int jacobian_callback(uno_int /*number_variables*/, uno_int number_jacobian_nonzeros, const double* x,
    double* jacobian_values, void* user_data) {
    auto* ctx = static_cast<MexProblemContext*>(user_data);
    try {
+      if (static_cast<std::size_t>(number_jacobian_nonzeros) != ctx->jacobian_row.size()) {
+         utilities::errWithId("sparsityMismatch",
+            "Uno requested {} Jacobian nonzeros but the registered pattern has {}.", number_jacobian_nonzeros,
+            ctx->jacobian_row.size());
+      }
       matlab::data::TypedArray<double> mx = make_x_vector(x, ctx->number_variables);
       auto retval = utilities::feval(ctx->funcs[0]["jacobian"], 1, {mx});
+      require_jacobian_sparse(retval[0], ctx->number_constraints, ctx->number_variables, "jacobian");
       update_pattern_values(ctx->jacobian_sparsity, retval[0], "jacobian");
       copy_pattern_values(ctx->jacobian_sparsity, jacobian_values);
       return 0;
@@ -316,16 +468,22 @@ static uno_int jacobian_callback(uno_int /*number_variables*/, uno_int /*number_
    }
 }
 
-static uno_int hessian_callback(uno_int number_variables, uno_int number_constraints, uno_int /*number_hessian_nonzeros*/,
+static uno_int hessian_callback(uno_int number_variables, uno_int number_constraints, uno_int number_hessian_nonzeros,
    const double* x, double objective_multiplier, const double* multipliers, double* hessian_values, void* user_data) {
    auto* ctx = static_cast<MexProblemContext*>(user_data);
    try {
+      if (static_cast<std::size_t>(number_hessian_nonzeros) != ctx->hessian_row.size()) {
+         utilities::errWithId("sparsityMismatch",
+            "Uno requested {} Hessian nonzeros but the registered pattern has {}.", number_hessian_nonzeros,
+            ctx->hessian_row.size());
+      }
       matlab::data::ArrayFactory factory;
       matlab::data::TypedArray<double> mx = make_x_vector(x, static_cast<std::size_t>(number_variables));
       matlab::data::TypedArray<double> sigma = factory.createScalar(objective_multiplier);
       matlab::data::TypedArray<double> lambda = factory.createArray<double>({static_cast<std::size_t>(number_constraints), 1});
       std::copy(multipliers, multipliers + number_constraints, lambda.begin());
       auto retval = utilities::feval(ctx->funcs[0]["hessian"], 1, {mx, sigma, lambda});
+      require_square_sparse(retval[0], ctx->number_variables, "hessian");
       update_pattern_values(*ctx->hessian_sparsity, retval[0], "hessian");
       copy_pattern_values(*ctx->hessian_sparsity, hessian_values);
       return 0;
@@ -471,8 +629,8 @@ void apply_solver_callbacks(void* solver, MexCallbackContext& callbacks) {
 
 matlab::data::StructArray pack_solution(void* solver, std::size_t number_variables, std::size_t number_constraints,
    matlab::data::ArrayFactory& factory) {
-   matlab::data::StructArray ret_val =
-      factory.createStructArray({1, 1}, {"solution", "cpu_time", "termination_status"});
+   matlab::data::StructArray ret_val = factory.createStructArray(
+      {1, 1}, {"solution", "cpu_time", "termination_status", "primal_feasibility", "stationarity", "complementarity"});
    matlab::data::StructArray sol = factory.createStructArray({1, 1},
       {"primals", "duals_lb_x", "duals_ub_x", "duals_constraints"});
 
@@ -493,6 +651,9 @@ matlab::data::StructArray pack_solution(void* solver, std::size_t number_variabl
    ret_val[0]["solution"] = std::move(sol);
    ret_val[0]["cpu_time"] = factory.createScalar(uno_get_cpu_time(solver));
    ret_val[0]["termination_status"] = factory.createScalar(optimization_status_message(uno_get_optimization_status(solver)));
+   ret_val[0]["primal_feasibility"] = factory.createScalar(uno_get_solution_primal_feasibility(solver));
+   ret_val[0]["stationarity"] = factory.createScalar(uno_get_solution_stationarity(solver));
+   ret_val[0]["complementarity"] = factory.createScalar(uno_get_solution_complementarity(solver));
    return ret_val;
 }
 

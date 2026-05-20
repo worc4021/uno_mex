@@ -1,38 +1,78 @@
-options = uno_options("ipopt");
-options.QP_solver = "HiGHS";
+function uno_test()
+
+problem = baseproblem("ipopt");
+problem.options.linear_solver = "MUMPS";
+assert(solveproblem(problem),"Failed with MUMPS");
+
+problem.options.linear_solver = "MA27";
+assert(solveproblem(problem),"Failed with MA27");
+
+problem.options.linear_solver = "MA57";
+assert(solveproblem(problem),"Failed with MA57");
+
+problem.options.hessian_model = "LBFGS";
+assert(solveproblem(problem),"Failed with LBFGS");
+
+problem.options.hessian_model = "LSR1";
+assert(solveproblem(problem),"Failed with LSR1");
+
+problem = baseproblem("filtersqp");
+problem.options.QP_solver = "BQPD";
+assert(solveproblem(problem),"Failed with BQPD");
+
+problem.options.QP_solver = "HiGHS";
+assert(solveproblem(problem),"Failed with HiGHS");
+
+problem.options.QP_solver = "BQPD";
+problem.options.hessian_model = "LBFGS";
+assert(solveproblem(problem),"Failed with LBFGS");
+
+problem.options.hessian_model = "LSR1";
+assert(solveproblem(problem),"Failed with LSR1");
+end
+
+function bSuccess = solveproblem(problem)
+    res = uno_mex(problem);
+    assert("Success" == res.termination_status, "Failed to converge, status %s", res.termination_status);
+    % Use Uno-reported residuals (preset-consistent); manual KKT is exact-Hessian only.
+    tol = 1e-5;
+    if isfield(problem.options, "preset") && problem.options.preset == "ipopt"
+        tol = 1e-7;
+    end
+    assert(res.primal_feasibility < tol, ...
+        "Primal feasibility %g exceeds %g", res.primal_feasibility, tol);
+    assert(res.stationarity < tol, ...
+        "Stationarity %g exceeds %g", res.stationarity, tol);
+    bSuccess = true;
+end
+
+function problem = baseproblem(preset)
+
+options = uno_options(preset);
 
 funcs.objective = @objective;
 funcs.gradient = @gradient;
 funcs.constraints = @constraints;
 funcs.jacobian = @jacobian;
 funcs.hessian = @hessian;
-funcs.gradient_nonzeros = @()2;
-funcs.jacobian_nonzeros = @()2;
-funcs.hessian_nonzeros = @()3;
 
 variableInfo.x0 = [3;2];
 variableInfo.lBnds = [-5;-5];
 variableInfo.uBnds = [5;5];
 variableInfo.clBnds = -inf;
 variableInfo.cuBnds = -2;
+variableInfo.jacobianNnz = 2;
+variableInfo.hessianNnz = 3;
 
 callbacks = struct;
 % callbacks.acceptable_iterate_callback = @(x,lambda,sigma)disp("acceptable Iterate");
-% callbacks.new_primals_callback = @(x)disp("new primals");
-% callbacks.new_multipliers_callback = @(lambda)disp("new duals");
 
-unostr.options = options;
-unostr.funcs = funcs;
-unostr.variableInfo = variableInfo;
-unostr.callbacks = callbacks;
+problem.options = options;
+problem.funcs = funcs;
+problem.variableInfo = variableInfo;
+problem.callbacks = callbacks;
+end
 
-res = uno_mex(unostr);
-
-grad = gradient(res.solution.primals);
-jac = jacobian(res.solution.primals);
-
-kkt = grad - res.solution.duals_constraints*jac';
-norm(kkt,'inf')
 
 % ----------------------------------------------------------------------
 function fVal = objective(var)
